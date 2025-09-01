@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: mcp-summarizer
+    env: docker
+    repo: mrelokusa/my-mcp-server   # replace with your actual repo slug
+    branch: main
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    buildCommand: ""
+    startCommand: ""
+    envVars:
+      - key: OPENAI_API_KEY
+        fromDatabase: false
+        value: ""   # set in Render dashboard instead of here for security
+  - type: cron
+    name: mcp-keepalive
+    schedule: "*/10 * * * *"  # every 10 minutes
+    command: 'curl -fsS https://mcp-summarizer.onrender.com/ >/dev/null || true'
+    plan: free
+    region: oregon
