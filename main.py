@@ -7,8 +7,9 @@ import requests
 
 app = FastAPI(title="MCP Summarizer")
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")  # change as needed
+# Gemini API key from environment
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyCgzU8GQUgi8Crs2qG8EKNEE_tZr_-F4xE")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-pro")  # change if needed
 
 class SummarizeRequest(BaseModel):
     text: str
@@ -20,7 +21,7 @@ class SummarizeResponse(BaseModel):
     source: Optional[str] = None
 
 def extractive_short(text: str, max_sentences: int = 3) -> str:
-    # simple fallback: split on sentences and return first N non-empty sentences
+    """Fallback simple summarizer"""
     import re
     sentences = re.split(r'(?<=[\.\!\?])\s+', text.strip())
     sents = [s for s in sentences if s]
@@ -32,42 +33,35 @@ def summarize(req: SummarizeRequest):
     if not text:
         raise HTTPException(status_code=400, detail="text must be provided in the request body")
 
-    # Prefer OpenAI if API key present, otherwise fallback to simple extractor
-    if OPENAI_API_KEY:
-        # Using OpenAI HTTP API call (keeps dependency surface minimal)
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        system = "You are a concise summarization assistant. Summarize the user's text into a short readable paragraph."
-        user_prompt = (
-            f"Summarize the following text into {req.max_sentences} sentences (concise, actionable):\n\n"
-            f"{text}\n\nProvide only the summary text."
-        )
+    if GEMINI_API_KEY:
+        # Gemini API call
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        headers = {"Content-Type": "application/json"}
         payload = {
-            "model": OPENAI_MODEL,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_prompt}
-            ],
-            "max_tokens": 400,
-            "temperature": 0.2,
-            "top_p": 1.0,
+            "contents": [
+                {
+                    "parts": [
+                        {"text": f"Summarize the following text into {req.max_sentences} sentences (concise, actionable):\n{text}"}
+                    ]
+                }
+            ]
         }
         try:
             r = requests.post(url, headers=headers, json=payload, timeout=30)
             r.raise_for_status()
             data = r.json()
-            # extract text – handle typical shape
-            content = data["choices"][0]["message"]["content"].strip()
+            # Gemini returns nested structure; extract first text part
+            content = data.get("candidates", [{}])[0].get("content", "").strip()
+            if not content:
+                # fallback if Gemini returns nothing
+                content = extractive_short(text, req.max_sentences)
             return SummarizeResponse(summary=content, source=req.source)
-        except Exception as e:
-            # fallback to extractive approach on failure
+        except Exception:
+            # fallback if API fails
             fallback = extractive_short(text, req.max_sentences)
             return SummarizeResponse(summary=fallback, source=req.source)
     else:
-        # No API key: simple extractive fallback
+        # No API key: fallback
         fallback = extractive_short(text, req.max_sentences)
         return SummarizeResponse(summary=fallback, source=req.source)
 
